@@ -36,13 +36,14 @@
     <div class="grid">
       <main class="panel glass">
         <h2>连接家庭云空间</h2>
-        <p class="desc">首次使用：先填 Supabase 配置，再创建家庭码。其他设备：填同样配置、家庭码和 PIN，点“加入/加载家庭”。</p>
+        <p class="desc">首次使用：先填 Supabase 配置并创建家庭码。邀请家人时可复制邀请链接，对方打开后只需填写 PIN 和昵称即可加入。</p>
         <div class="form">
           <input class="input" id="supabaseUrl" placeholder="Supabase Project URL，如 https://xxxx.supabase.co">
           <textarea class="textarea" id="anonKey" placeholder="Supabase anon public key（不要填 service_role key）"></textarea>
           <div class="row"><input class="input" id="familyCode" placeholder="家庭码，如 maru-family"><input class="input" id="familyPin" type="password" placeholder="家庭 PIN，至少4位"></div>
           <div class="row"><select class="select" id="role"><option value="parent">家长模式</option><option value="child">孩子模式</option></select><input class="input" id="memberName" placeholder="成员昵称，如 妈妈 / 宝宝"></div>
           <div class="toolbar"><button class="btn primary" onclick="createFamily()">✨ 创建新家庭</button><button class="btn blue" onclick="loadFamily()">☁️ 加入/加载家庭</button><button class="btn ghost" onclick="saveConfigOnly()">💾 仅保存配置</button></div>
+          <div class="toolbar"><button class="btn green" onclick="copyInvite('parent')">👨‍👩‍👧 复制家长邀请链接</button><button class="btn ghost" onclick="copyInvite('child')">🧒 复制孩子邀请链接</button></div>
         </div>
       </main>
       <aside class="panel glass">
@@ -91,6 +92,9 @@ async function createFamily(){try{saveConfig();let payload=defaultPayload();payl
 async function loadFamily(){try{saveConfig();let data=await rpc('load_family',{p_family_code:config.family,p_pin:config.pin});state=data.state||defaultPayload();lastCloudHash=hashState(state);lastSyncAt=now();toast('云端数据已加载，自动同步已开启');render();startAutoSync();tab('tasks')}catch(e){toast('加载失败：'+errMsg(e))}}
 async function saveCloud(){try{saveConfig();localSaving=true;await rpc('save_family',{p_family_code:config.family,p_pin:config.pin,p_state:state});lastCloudHash=hashState(state);lastSyncAt=now();renderBadges();setTimeout(()=>{localSaving=false},500);return true}catch(e){localSaving=false;toast('保存失败：'+errMsg(e));return false}}
 function saveConfigOnly(){saveConfig();toast('配置已保存到本机浏览器')}
+function applyInviteParams(){let p=new URLSearchParams(location.search);let changed=false;if(p.get('su')){config.url=p.get('su');changed=true}if(p.get('ak')){config.key=p.get('ak');changed=true}if(p.get('family')){config.family=p.get('family');changed=true}if(p.get('role')){config.role=p.get('role');changed=true}if(p.get('member')){config.member=p.get('member');changed=true}if(changed){config.pin='';localStorage.setItem(LOCAL,JSON.stringify(config));}}
+function buildInviteLink(inviteRole){saveConfig();if(!config.url||!config.key||!config.family){toast('请先填写并保存 Supabase URL、anon key 和家庭码');return ''}let base=location.origin+location.pathname;let p=new URLSearchParams();p.set('su',config.url);p.set('ak',config.key);p.set('family',config.family);p.set('role',inviteRole);return base+'?'+p.toString()}
+async function copyInvite(inviteRole){let link=buildInviteLink(inviteRole);if(!link)return;try{await navigator.clipboard.writeText(link);toast((inviteRole==='parent'?'家长':'孩子')+'邀请链接已复制，对方只需填写 PIN 和昵称')}catch(e){prompt('复制下面的邀请链接（不包含 PIN）',link)}}
 function hashState(obj){try{return JSON.stringify(obj)}catch(e){return String(Date.now())}}
 function canSync(){return !!(config.url&&config.key&&config.family&&config.pin)}
 function startAutoSync(){stopAutoSync();if(!canSync()){renderBadges();return}syncTimer=setInterval(autoSync,1000);renderBadges();autoSync(true)}
@@ -109,7 +113,7 @@ async function reopenTask(tid){await syncBeforeAction();mutate(()=>{let t=state.
 function delTask(tid){openModal('删除任务','确定删除这个任务吗？',()=>mutate(()=>{state.tasks=state.tasks.filter(t=>t.id!==tid);log('delete','删除任务','删除了一个任务')},'任务已删除'))}
 function addReward(){let name=rewardName.value.trim(),cost=parseInt(rewardCost.value||0,10),desc=rewardDesc.value.trim();if(!name)return toast('请填写奖励名称');if(!cost||cost<1)return toast('积分要大于0');mutate(()=>{state.rewards.unshift({id:id(),name,cost,desc,emoji:'🎁'});log('reward','新增奖励',name);rewardName.value='';rewardCost.value=30;rewardDesc.value=''},'奖励已添加')}
 function redeem(rid){let r=state.rewards.find(x=>x.id===rid);if(!r)return;if(state.score<r.cost)return toast('积分不够，还差 '+(r.cost-state.score)+' 分');if(isParent()){openModal('确认兑换','确定兑换「'+r.name+'」并扣除 '+r.cost+' 积分吗？',()=>mutate(()=>{state.score-=r.cost;log('redeem','兑换奖励',r.name,-r.cost);confetti()},'兑换成功'))}else{mutate(()=>{log('request','申请兑换',`${config.member||'孩子'} 申请兑换「${r.name}」（${r.cost}积分）`,0)},'已提交兑换申请，请家长确认') }}
-function renderBadges(){cloudBadge.textContent=config.url?'已配置云端':'未连接云端';cloudBadge.className='badge '+(config.url?'ok':'warn');roleBadge.textContent=(config.role==='child'?'孩子模式':'家长模式');roleBadge.className='badge '+(config.role==='child'?'warn':'ok');familyBadge.textContent=config.family?('家庭码：'+config.family):'无家庭空间';familyBadge.className='badge '+(config.family?'ok':'warn');if(typeof syncBadge!=='undefined'){if(syncTimer){syncBadge.textContent='自动同步中'+(lastSyncAt?'｜'+lastSyncAt.split(' ').pop():'');syncBadge.className='badge ok'}else{syncBadge.textContent='未启动同步';syncBadge.className='badge warn'}}statusBox.innerHTML=config.url?`已保存配置。<br>Project URL：${esc(config.url)}<br>家庭码：${esc(config.family||'未填写')}<br>角色：${config.role==='child'?'孩子模式':'家长模式'}<br>同步状态：${syncTimer?'自动同步中，每 1 秒检查一次云端变化':'尚未启动，创建或加载家庭后自动开启'}<br><br>另一台设备填同样配置、家庭码和 PIN 后，会自动同步同一份云端数据。`:'尚未连接。请先执行 Supabase SQL，再创建或加载家庭空间。'}
+function renderBadges(){cloudBadge.textContent=config.url?'已配置云端':'未连接云端';cloudBadge.className='badge '+(config.url?'ok':'warn');roleBadge.textContent=(config.role==='child'?'孩子模式':'家长模式');roleBadge.className='badge '+(config.role==='child'?'warn':'ok');familyBadge.textContent=config.family?('家庭码：'+config.family):'无家庭空间';familyBadge.className='badge '+(config.family?'ok':'warn');if(typeof syncBadge!=='undefined'){if(syncTimer){syncBadge.textContent='自动同步中'+(lastSyncAt?'｜'+lastSyncAt.split(' ').pop():'');syncBadge.className='badge ok'}else{syncBadge.textContent='未启动同步';syncBadge.className='badge warn'}}statusBox.innerHTML=config.url?`已保存配置。<br>Project URL：${esc(config.url)}<br>家庭码：${esc(config.family||'未填写')}<br>角色：${config.role==='child'?'孩子模式':'家长模式'}<br>同步状态：${syncTimer?'自动同步中，每 1 秒检查一次云端变化':'尚未启动，创建或加载家庭后自动开启'}<br><br>你可以复制邀请链接给家人；链接会预填云端配置和家庭码，但不会携带 PIN。家人只需输入 PIN 和昵称即可加入。`:'尚未连接。请先执行 Supabase SQL，再创建或加载家庭空间。'}
 function render(){renderBadges();let done=state.tasks.filter(t=>t.status==='done').length,pending=state.tasks.filter(t=>t.status==='pending').length;score.textContent=state.score||0;taskTotal.textContent=state.tasks.length;taskDone.textContent=done;pendingCount.textContent=pending;renderTasks();renderRewards();renderLogs()}
 function statusLabel(s){return s==='done'?'<span class="badge ok">已完成</span>':s==='pending'?'<span class="badge warn">待家长确认</span>':'<span class="badge">进行中</span>'}
 function renderTasks(){if(!state.tasks.length){taskList.innerHTML='<div class="empty">还没有任务，先添加一个吧</div>';return}taskList.innerHTML=state.tasks.map(t=>`<div class="task ${t.status}"><div class="icon">${t.status==='done'?'🏆':t.status==='pending'?'⏳':'⭐'}</div><div><div class="title">${esc(t.name)}</div><div class="meta"><span class="pill">${esc(t.category)}</span><span class="pill">+${t.points}分</span>${statusLabel(t.status)}<span class="pill">${esc(t.standard||'完成即可')}</span></div></div><div class="actions">${t.status==='open'?`<button class="btn small blue" onclick="submitDone('${t.id}')">我完成了</button>`:''}${isParent()&&t.status!=='done'?`<button class="btn small green" onclick="confirmDone('${t.id}')">家长确认</button>`:''}${isParent()&&t.status==='pending'?`<button class="btn small ghost" onclick="reopenTask('${t.id}')">退回</button>`:''}${isParent()?`<button class="btn small red" onclick="delTask('${t.id}')">删除</button>`:''}</div></div>`).join('')}
@@ -122,7 +126,7 @@ function confetti(){let colors=['#ff8a3d','#ff6b9d','#36c48f','#4f8cff','#f5b800
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)autoSync(true)});
 window.addEventListener('focus',()=>autoSync(true));
 document.addEventListener('pointerdown',()=>{if(canSync())autoSync(true)},{passive:true});
-fillConfig();render();if(canSync())startAutoSync();
+applyInviteParams();fillConfig();render();if(canSync())startAutoSync();
 </script>
 </body>
 </html>
